@@ -1,0 +1,89 @@
+name: Build Hi3798MV200 kernel (Docker support)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Install build deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc make gettext bison flex bc \
+            libncurses-dev lzma u-boot-tools libssl-dev wget xz-utils
+
+      - name: Get Linaro gcc 4.9.4 toolchain (same as E2D kernel)
+        run: |
+          wget -q https://releases.linaro.org/components/toolchain/binaries/4.9-2017.01/arm-linux-gnueabihf/gcc-linaro-4.9.4-2017.01-x86_64_arm-linux-gnueabihf.tar.xz
+          tar xf gcc-linaro-4.9.4-2017.01-x86_64_arm-linux-gnueabihf.tar.xz
+          export PATH=$PWD/gcc-linaro-4.9.4-2017.01-x86_64_arm-linux-gnueabihf/bin:$PATH
+          arm-linux-gnueabihf-gcc --version | head -1
+
+      - name: Checkout kernel source (atto-linux branch, shallow)
+        run: |
+          git clone --depth 1 --branch atto-linux \
+            https://github.com/leandrotsampa/hisilicon-kernel.git src
+          cd src
+          git log -1 --format='HEAD: %h %ad %s'
+          echo "=== available defconfigs ==="
+          ls arch/arm/configs/ | grep -iE 'dinobot|atto|hi3798' || echo "NO MATCH"
+
+      - name: Pick defconfig and enable Docker features
+        run: |
+          cd src
+          export PATH=$PWD/../gcc-linaro-4.9.4-2017.01-x86_64_arm-linux-gnueabihf/bin:$PATH
+          # auto-pick defconfig: atto > dinobot > hi3798mv200 > hi3798mv100
+          DEF=$(ls arch/arm/configs/ | grep -im1 'atto' || true)
+          [ -z "$DEF" ] && DEF=$(ls arch/arm/configs/ | grep -im1 'dinobot' || true)
+          [ -z "$DEF" ] && DEF=$(ls arch/arm/configs/ | grep -im1 'hi3798mv200' || true)
+          [ -z "$DEF" ] && DEF=$(ls arch/arm/configs/ | grep -im1 'hi3798mv100' || true)
+          if [ -z "$DEF" ]; then echo "FATAL: no defconfig found"; ls arch/arm/configs/ | head -30; exit 1; fi
+          echo "USING defconfig: $DEF"
+          make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- "$DEF"
+
+          # ---- Docker runtime requirements (kernel 4.4) ----
+          ./scripts/config \
+            -e CGROUPS -e CGROUP_SCHED -e FAIR_GROUP_SCHED -e CGROUP_CPUACCT \
+            -e CGROUP_CPUSET -e CGROUP_PIDS -e CGROUP_FREEZER -e CGROUP_DEVICE \
+            -e CGROUP_PERF -e MEMCG -e MEMCG_SWAP -e MEMCG_KMEM -e BLK_CGROUP \
+            -e CGROUP_WRITEBACK -e NET_CLS_CGROUP -e CGROUP_NET_PRIO \
+            -e NAMESPACES -e UTS_NS -e IPC_NS -e USER_NS -e PID_NS -e NET_NS \
+            -e DEVPTS_MULTIPLE_INSTANCES -e POSIX_MQUEUE \
+            -e FHANDLE -e DEVTMPFS -e DEVTMPFS_MOUNT \
+            -e VETH -e BRIDGE -e BRIDGE_NETFILTER -e LLC -e STP \
+            -e NETFILTER -e NETFILTER_ADVANCED -e NF_CONNTRACK -e NF_CONNTRACK_IPV4 \
+            -e NF_NAT -e NF_NAT_IPV4 -e NF_NAT_NEEDED \
+            -e IP_NF_IPTABLES -e IP_NF_FILTER -e IP_NF_NAT -e IP_NF_TARGET_MASQUERADE \
+            -e IP_NF_TARGET_REJECT -e NETFILTER_XT_TARGET_CHECKSUM \
+            -e NETFILTER_XT_MATCH_ADDRTYPE -e NETFILTER_XT_MATCH_CONNTRACK \
+            -e NETFILTER_XT_MATCH_IPVS -e NETFILTER_XT_NAT \
+            -e IPV6 -e IP6_NF_IPTABLES -e IP6_NF_FILTER -e IP6_NF_NAT \
+            -e OVERLAY_FS -e KEYS -e SECCOMP -e SECCOMP_FILTER \
+            -e EXT4_FS_POSIX_ACL -e EXT4_FS_SECURITY
+          make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- olddefconfig
+
+          echo "=== verify critical options ==="
+          grep -E '^CONFIG_(CGROUPS|MEMCG|NET_NS|VETH|BRIDGE|OVERLAY_FS|NF_NAT|FHANDLE)=' .config
+
+      - name: Build zImage + modules
+        run: |
+          cd src
+          export PATH=$PWD/../gcc-linaro-4.9.4-2017.01-x86_64_arm-linux-gnueabihf/bin:$PATH
+          make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- -j$(nproc) zImage
+          make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- -j$(nproc) modules || echo "modules build had warnings"
+          # pack uImage, load/entry 0x20000000 = same as running uImage.e2d
+          mkimage -A arm -O linux -T kernel -C none -a 0x2000000 -e 0x2000000 \
+            -n "Linux-4.4.35-docker" -d arch/arm/boot/zImage uImage
+          ls -la uImage arch/arm/boot/zImage
+
+      - name: Upload kernel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: uImage-mv200-docker
+          path: |
+            src/uImage
+            src/.config
+          if-no-files-found: error
