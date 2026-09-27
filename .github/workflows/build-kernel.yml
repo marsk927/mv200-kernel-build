@@ -7,6 +7,8 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     timeout-minutes: 90
+    permissions:
+      contents: write
 
     steps:
       - name: Install build deps
@@ -96,11 +98,11 @@ jobs:
       - name: Push uImage back to repo (for API download)
         run: |
           cd src
-          git config user.email "bot@users.noreply.github.com"
-          git config user.name "kernel-builder"
           git clone --depth 1 https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git out
           cp uImage .config out/
           cd out
+          git config user.email "bot@users.noreply.github.com"
+          git config user.name "kernel-builder"
           git add uImage .config
           git commit -m "kernel build artifact ${GITHUB_SHA::7}"
           git push https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git main
