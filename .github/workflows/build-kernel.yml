@@ -71,8 +71,9 @@ jobs:
         run: |
           cd src
           export PATH=$PWD/../tc/bin:$PATH
-          # GCC10+ compat: -fno-common default breaks old dtc (yylloc) and kernel C code
-          sed -i 's/YYLTYPE yylloc/extern YYLTYPE yylloc/' scripts/dtc/dtc-lexer.l
+          # GCC10+ compat: -fno-common breaks old dtc yylloc; .lex.c is SHIPPED (pre-generated) so patch it too
+          sed -i 's/YYLTYPE yylloc/extern YYLTYPE yylloc/' scripts/dtc/dtc-lexer.l scripts/dtc/dtc-lexer.lex.c
+          grep -n "yylloc" scripts/dtc/dtc-lexer.lex.c | head -3
           make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- KCFLAGS="-fcommon" -j$(nproc) zImage
           make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- KCFLAGS="-fcommon" -j$(nproc) modules || echo "modules build had warnings"
           # pack uImage, load/entry 0x20000000 = same as running uImage.e2d
