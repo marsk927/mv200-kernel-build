@@ -36,17 +36,16 @@ jobs:
         run: |
           cd src
           export PATH=$PWD/../tc/bin:$PATH
-          # auto-pick defconfig: atto > dinobot > hi3798mv200 > hi3798mv100
-          DEF=$(ls arch/arm/configs/ | grep -im1 'atto' || true)
-          [ -z "$DEF" ] && DEF=$(ls arch/arm/configs/ | grep -im1 'dinobot' || true)
-          [ -z "$DEF" ] && DEF=$(ls arch/arm/configs/ | grep -im1 'hi3798mv200' || true)
-          [ -z "$DEF" ] && DEF=$(ls arch/arm/configs/ | grep -im1 'hi3798mv100' || true)
-          if [ -z "$DEF" ]; then echo "FATAL: no defconfig found"; ls arch/arm/configs/ | head -30; exit 1; fi
+          # 海思官方 mv200 Linux defconfig (HIETH 网卡 y / HIMCIV300 eMMC y / USB_STORAGE y)
+          DEF=hi3798mv200_linux_defconfig
+          [ -f arch/arm/configs/$DEF ] || { echo "FATAL: $DEF missing"; ls arch/arm/configs/ | grep hi3798mv200; exit 1; }
           echo "USING defconfig: $DEF"
           make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- "$DEF"
 
           # ---- Docker runtime requirements (kernel 4.4) ----
           ./scripts/config \
+            -d LOCALVERSION_AUTO \
+            --set-str LOCALVERSION _ecoo_81082668 \
             -e CGROUPS -e CGROUP_SCHED -e FAIR_GROUP_SCHED -e CGROUP_CPUACCT \
             -e CGROUP_CPUSET -e CGROUP_PIDS -e CGROUP_FREEZER -e CGROUP_DEVICE \
             -e CGROUP_PERF -e MEMCG -e MEMCG_SWAP -e MEMCG_KMEM -e BLK_CGROUP \
