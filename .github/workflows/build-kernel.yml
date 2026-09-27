@@ -71,8 +71,10 @@ jobs:
         run: |
           cd src
           export PATH=$PWD/../tc/bin:$PATH
-          make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- -j$(nproc) zImage
-          make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- -j$(nproc) modules || echo "modules build had warnings"
+          # GCC10+ compat: -fno-common default breaks old dtc (yylloc) and kernel C code
+          sed -i 's/YYLTYPE yylloc/extern YYLTYPE yylloc/' scripts/dtc/dtc-lexer.l
+          make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- KCFLAGS="-fcommon" -j$(nproc) zImage
+          make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- KCFLAGS="-fcommon" -j$(nproc) modules || echo "modules build had warnings"
           # pack uImage, load/entry 0x20000000 = same as running uImage.e2d
           mkimage -A arm -O linux -T kernel -C none -a 0x2000000 -e 0x2000000 \
             -n "Linux-4.4.35-docker" -d arch/arm/boot/zImage uImage
