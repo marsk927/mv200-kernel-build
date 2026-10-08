@@ -114,6 +114,13 @@ jobs:
           make ARCH=arm CROSS_COMPILE=$CROSS_COMPILE olddefconfig
           grep -E "CGROUPS=|CGROUP_PIDS|VETH|OVERLAY_FS|NET_NS" .config | head -10
 
+      - name: Fix dtc yylloc (gcc>=10 -fno-common)
+        run: |
+          sed -i 's/YYLTYPE yylloc;/extern YYLTYPE yylloc;/' \
+            scripts/dtc/dtc-lexer.lex.c_shipped scripts/dtc/dtc-lexer.l_shipped \
+            scripts/dtc/dtc-lexer.l scripts/dtc/dtc-lexer.lex.c 2>/dev/null || true
+          grep -rn "yylloc;" scripts/dtc/ | head -5
+
       - name: Build zImage + modules
         run: |
           export PATH="$PWD/toolchain/gcc-linaro-4.9.4-2017.01-x86_64_arm-linux-gnueabihf/bin:$PATH"
