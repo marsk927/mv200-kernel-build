@@ -34,11 +34,11 @@ jobs:
       - name: Download Linaro gcc 4.9.4
         run: |
           if [ ! -d ./toolchain/gcc-linaro-4.9.4-2017.01-x86_64_arm-linux-gnueabihf ]; then
-            # 注意: Linaro 老版下载 URL 有变动史, 若 404 请到
-            # https://releases.linaro.org/components/toolchain/binaries/4.9-2017.01/
-            # 核对实际文件名后修正
-            URL="https://releases.linaro.org/components/toolchain/binaries/4.9-2017.01/arm-linux-gnueabihf/gcc-linaro-4.9.4-2017.01-x86_64_arm-linux-gnueabihf.tar.xz"
-            curl -fSL -o tc.tar.xz "$URL"
+            # Linaro 官方已下架老版本(releases.linaro.org 重定向联系页)
+            # 改用 Armbian 官方镜像 dotsrc.org, 文件名与原版一致
+            URL="https://mirrors.dotsrc.org/armbian-dl/_toolchain/gcc-linaro-4.9.4-2017.01-x86_64_arm-linux-gnueabihf.tar.xz"
+            curl -fSL --retry 3 -o tc.tar.xz "$URL"
+            file tc.tar.xz | grep -q "XZ" || { echo "BAD DOWNLOAD"; head -c 300 tc.tar.xz; exit 1; }
             mkdir -p toolchain && tar xf tc.tar.xz -C toolchain
           fi
 
