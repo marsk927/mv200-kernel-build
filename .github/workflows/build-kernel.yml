@@ -74,7 +74,13 @@ jobs:
           CONFIG_NETFILTER=y
           CONFIG_NETFILTER_ADVANCED=y
           CONFIG_NF_CONNTRACK=m
+          CONFIG_NF_CONNTRACK_IPV4=y
           CONFIG_NF_NAT=m
+          CONFIG_NF_NAT_IPV4=m
+          CONFIG_NF_NAT_PROTO=m
+          CONFIG_NF_DEFRAG_IPV4=m
+          CONFIG_NETFILTER_XT_NAT=m
+          CONFIG_NETFILTER_XT_MATCH_STATE=m
           CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=m
           CONFIG_NETFILTER_XT_MATCH_CONNTRACK=m
           CONFIG_NETFILTER_XT_MATCH_IPVS=y
@@ -109,10 +115,13 @@ jobs:
           make ARCH=arm CROSS_COMPILE=$CROSS_COMPILE olddefconfig
           # 打独立版本号, 避免与 rootfs 自带 4.4.35_ecoo 模块目录冲突
           ./scripts/config --file .config \
-            --set-str LOCALVERSION "-docker1" \
+            --set-str LOCALVERSION "-docker3" \
             --disable LOCALVERSION_AUTO
           make ARCH=arm CROSS_COMPILE=$CROSS_COMPILE olddefconfig
           grep -E "CGROUPS=|CGROUP_PIDS|VETH|OVERLAY_FS|NET_NS" .config | head -10
+          # 关键断言: NAT 链必须存活(缺 NF_CONNTRACK_IPV4 时会被 kconfig 静默丢弃)
+          grep -E "CONFIG_IP_NF_NAT=m|CONFIG_IP_NF_TARGET_MASQUERADE=m|CONFIG_NF_CONNTRACK_IPV4=y" .config \
+            || { echo '!! NAT chain silently dropped !!'; exit 1; }
 
       - name: Fix dtc yylloc (gcc>=10 -fno-common)
         run: |
@@ -137,17 +146,17 @@ jobs:
           cat arch/arm/boot/zImage arch/arm/boot/dts/hi3798mv200.dtb > arch/arm/boot/zImage_dtb
           ls -la arch/arm/boot/zImage arch/arm/boot/dts/hi3798mv200.dtb arch/arm/boot/zImage_dtb
           mkimage -A arm -O linux -T kernel -C none \
-            -a 0x20000000 -e 0x20000000 -n "docker2" \
-            -d arch/arm/boot/zImage_dtb uImage.docker2
+            -a 0x20000000 -e 0x20000000 -n "docker3" \
+            -d arch/arm/boot/zImage_dtb uImage.docker3
           INSTALL_MOD_PATH=./modout make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- modules_install
-          tar czf modules-docker2.tar.gz -C modout lib
-          sha256sum uImage.docker2 modules-docker2.tar.gz | tee SHA256SUMS.txt
+          tar czf modules-docker3.tar.gz -C modout lib
+          sha256sum uImage.docker3 modules-docker3.tar.gz | tee SHA256SUMS.txt
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: hi3798mv200-docker2
+          name: hi3798mv200-docker3
           path: |
-            uImage.docker2
-            modules-docker2.tar.gz
+            uImage.docker3
+            modules-docker3.tar.gz
             SHA256SUMS.txt
