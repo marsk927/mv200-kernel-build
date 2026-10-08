@@ -121,26 +121,33 @@ jobs:
             scripts/dtc/dtc-lexer.l scripts/dtc/dtc-lexer.lex.c 2>/dev/null || true
           grep -rn "yylloc;" scripts/dtc/ | head -5
 
-      - name: Build zImage + modules
+      - name: Build zImage + DTB + modules
         run: |
           export PATH="$PWD/toolchain/gcc-linaro-4.9.4-2017.01-x86_64_arm-linux-gnueabihf/bin:$PATH"
           export CROSS_COMPILE=arm-linux-gnueabihf-
-          make -j$(nproc) ARCH=arm CROSS_COMPILE=$CROSS_COMPILE zImage modules
+          # 关键校验: 必须有 APPENDED_DTB+ATAG_COMPAT, 否则 U-Boot ATAGS 交接直接黑屏
+          grep -E "CONFIG_ARM_APPENDED_DTB=|CONFIG_ARM_ATAG_DTB_COMPAT=|CONFIG_MACH_HI3798MV2X=" .config \
+            || { echo '!! missing appended-dtb config !!'; exit 1; }
+          make -j$(nproc) ARCH=arm CROSS_COMPILE=$CROSS_COMPILE zImage modules dtbs
+          ls -la arch/arm/boot/dts/hi3798mv200.dtb
 
       - name: Pack uImage + modules
         run: |
+          # 手动追加 DTB 到 zImage 尾部 (ATAG_DTB_COMPAT 启动时接管 U-Boot 的 ATAGS+bootargs)
+          cat arch/arm/boot/zImage arch/arm/boot/dts/hi3798mv200.dtb > arch/arm/boot/zImage_dtb
+          ls -la arch/arm/boot/zImage arch/arm/boot/dts/hi3798mv200.dtb arch/arm/boot/zImage_dtb
           mkimage -A arm -O linux -T kernel -C none \
-            -a 0x20000000 -e 0x20000000 -n "docker1" \
-            -d arch/arm/boot/zImage uImage.docker1
+            -a 0x20000000 -e 0x20000000 -n "docker2" \
+            -d arch/arm/boot/zImage_dtb uImage.docker2
           INSTALL_MOD_PATH=./modout make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- modules_install
-          tar czf modules-docker1.tar.gz -C modout lib
-          sha256sum uImage.docker1 modules-docker1.tar.gz | tee SHA256SUMS.txt
+          tar czf modules-docker2.tar.gz -C modout lib
+          sha256sum uImage.docker2 modules-docker2.tar.gz | tee SHA256SUMS.txt
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: hi3798mv200-docker1
+          name: hi3798mv200-docker2
           path: |
-            uImage.docker1
-            modules-docker1.tar.gz
+            uImage.docker2
+            modules-docker2.tar.gz
             SHA256SUMS.txt
