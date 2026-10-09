@@ -1,10 +1,13 @@
 name: build-hi3798mv200-docker-kernel
 
-# E2D 内核 + Docker 三要素 云编译
-# 基线: leandrotsampa/hisilicon-kernel @ atto-linux (E2D, 4.4.35)
-# 策略: 用该树自带的 hi3798mv200_linux_defconfig 作基底 (上次黑屏教训: 外部 SDK defconfig 缺板级驱动)
-#       再 merge docker_fragment.config 增量开 Docker 选项
-# 产物: uImage.docker + modules.tar.gz
+# docker4 = docker3 + 海思 MSP 驱动全家桶 (温度/pm_cpu 修复)
+# 基线: leandrotsampa/hisilicon-kernel @ atto-linux (4.4.35)
+# 变更: make 时命令行传 CONFIG_MSP=y (drivers/Makefile 的 make 变量开关,
+#       不是 Kconfig 符号, 写进 .config 会被 olddefconfig 丢弃!)
+#       打开后 drivers/common + drivers/msp 编入内核, 含 hi_pmoc(/proc/msp/pm_cpu 温度)
+# 实证: E2D 内核(同树,带MSP) 解包含 /proc/msp 241处; docker3(不带) 0处
+# 产物: uImage.docker4 + modules-docker4.tar.gz
+# 注意: LOCALVERSION 保持 -docker3 (vermagic 不变, 与 rootfs /lib/modules/4.4.35-docker3 配对)
 
 on:
   workflow_dispatch:
@@ -23,7 +26,7 @@ jobs:
       - name: Install host tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc libncurses5-dev u-boot-tools
+          sudo apt-get install -y bc libncurses5-dev u-boot-tools binutils
 
       - name: Cache Linaro toolchain
         uses: actions/cache@v4
@@ -130,15 +133,31 @@ jobs:
             scripts/dtc/dtc-lexer.l scripts/dtc/dtc-lexer.lex.c 2>/dev/null || true
           grep -rn "yylloc;" scripts/dtc/ | head -5
 
-      - name: Build zImage + DTB + modules
+      - name: Build zImage + DTB + modules (with MSP)
         run: |
           export PATH="$PWD/toolchain/gcc-linaro-4.9.4-2017.01-x86_64_arm-linux-gnueabihf/bin:$PATH"
           export CROSS_COMPILE=arm-linux-gnueabihf-
           # 关键校验: 必须有 APPENDED_DTB+ATAG_COMPAT, 否则 U-Boot ATAGS 交接直接黑屏
           grep -E "CONFIG_ARM_APPENDED_DTB=|CONFIG_ARM_ATAG_DTB_COMPAT=|CONFIG_MACH_HI3798MV2X=" .config \
             || { echo '!! missing appended-dtb config !!'; exit 1; }
-          make -j$(nproc) ARCH=arm CROSS_COMPILE=$CROSS_COMPILE zImage modules dtbs
+          # CONFIG_MSP=y: drivers/Makefile 的 make 变量开关(ifeq ($(CONFIG_MSP),y)),
+          # 打开后编入 drivers/common + drivers/msp (含 hi_pmoc → /proc/msp/pm_cpu 温度)
+          # 基线 CFG 由树根 base.mak 提供(mv200/DVFS/AVS/温控阈值已配好)
+          make -j$(nproc) ARCH=arm CROSS_COMPILE=$CROSS_COMPILE CONFIG_MSP=y zImage modules dtbs
           ls -la arch/arm/boot/dts/hi3798mv200.dtb
+
+      - name: Assert MSP present in kernel
+        run: |
+          # 硬断言: /proc/msp 字符串必须进 vmlinux (E2D 实证存在; docker3 漏编时为 0)
+          if strings vmlinux | grep -q "/proc/msp"; then
+            echo "MSP OK: /proc/msp found in vmlinux"
+            strings vmlinux | grep -cE "pm_cpu|pm_gpu|pm_temp" || true
+          else
+            echo '!! MSP drivers missing from vmlinux !!'
+            echo '--- drivers/msp objects:'
+            find drivers/msp -name '*.o' 2>/dev/null | head -10
+            exit 1
+          fi
 
       - name: Pack uImage + modules
         run: |
@@ -146,17 +165,17 @@ jobs:
           cat arch/arm/boot/zImage arch/arm/boot/dts/hi3798mv200.dtb > arch/arm/boot/zImage_dtb
           ls -la arch/arm/boot/zImage arch/arm/boot/dts/hi3798mv200.dtb arch/arm/boot/zImage_dtb
           mkimage -A arm -O linux -T kernel -C none \
-            -a 0x20000000 -e 0x20000000 -n "docker3" \
-            -d arch/arm/boot/zImage_dtb uImage.docker3
+            -a 0x20000000 -e 0x20000000 -n "docker4" \
+            -d arch/arm/boot/zImage_dtb uImage.docker4
           INSTALL_MOD_PATH=./modout make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- modules_install
-          tar czf modules-docker3.tar.gz -C modout lib
-          sha256sum uImage.docker3 modules-docker3.tar.gz | tee SHA256SUMS.txt
+          tar czf modules-docker4.tar.gz -C modout lib
+          sha256sum uImage.docker4 modules-docker4.tar.gz | tee SHA256SUMS.txt
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: hi3798mv200-docker3
+          name: hi3798mv200-docker4
           path: |
-            uImage.docker3
-            modules-docker3.tar.gz
+            uImage.docker4
+            modules-docker4.tar.gz
             SHA256SUMS.txt
